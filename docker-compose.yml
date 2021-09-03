@@ -1,0 +1,12 @@
+version: '3.7'
+
+services:
+  goservice-template:
+    image: home24/goservice-template:$DOCKER_TAG
+    environment:
+      VERSION: local
+
+networks:
+  default:
+    external:
+      name: dcsnetwork

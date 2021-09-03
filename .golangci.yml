@@ -1,0 +1,32 @@
+run:
+  deadline: 3m
+
+linters:
+  enable-all: true
+  disable:
+    - godot # Forces you to put dot at the end of the sentence in comment.
+    - scopelint # Deprecated.
+    - interfacer # Deprecated.
+    - maligned # Deprecated.
+    - exhaustivestruct # Forces to list all fields when creating struct.
+    - wrapcheck # Forces wrapping all errors, returned from external packages.
+
+issues:
+  # Ignore all default error exclusions
+  exclude-use-default: false
+  # But still keep this exclusions:
+  exclude:
+    # gosec: Triggered by 'src, err := ioutil.ReadFile(filename)'
+    - Potential file inclusion via variable
+    - at least one file in a package should have a package comment
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - noctx # Forces to always use context when sending HTTP requests.
+        - testpackage # Forces you to put tests in separate *_test package.
+        - paralleltest # Forces enabling parallel testing support for all tests.
+
+linters-settings:
+  lll:
+    # max line length, lines longer will be reported. Default is 120.
+    line-length: 160

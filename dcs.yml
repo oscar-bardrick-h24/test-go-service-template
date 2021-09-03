@@ -1,0 +1,9 @@
+dcs:
+  dir: ~/dcs/goservice-template
+
+projects:
+  GoService-Template:
+    branch: master
+
+  Infrastructure-Containers-Nginx:
+    branch: passthrough

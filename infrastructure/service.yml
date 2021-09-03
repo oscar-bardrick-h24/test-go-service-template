@@ -1,0 +1,537 @@
+Description: >
+  Example template for service with CloudWatch logging
+
+
+Parameters:
+  # Parameters to be updated by your service
+  ContainerName:
+    Type: String
+    Description: "Name of default container for task definition. Using parameter because same name is reused across resources"
+  ContainerMaxMemory:
+    Type: Number
+    MinValue: 5
+    Description: "MB of RAM needed for container to run. Align with ContainerMaxCpuShare and EC2InstanceType"
+  ContainerMaxCpuShare:
+    Type: Number
+    MinValue: 4
+    MaxValue: 4096
+    Description: "CPU share for vCPU * 1024. Align with ContainerMaxMemory and EC2InstanceType"
+  ServiceTaskMinCap:
+    Type: Number
+    Description: "Minimum number of tasks to keep running under service (Auto Scaling)"
+  ServiceTaskDesiredCount:
+    Type: String
+    Description: "Desired number of tasks to keep running under service (Auto Scaling). Set for stack creation, keep empty for updates."
+  ServiceTaskMaxCap:
+    Type: Number
+    MinValue: 0
+    Description: "Maximum number of tasks to keep running under service (Auto Scaling)"
+  ECSServiceCPUScalingTarget:
+    Type: Number
+    MaxValue: 100
+    MinValue: 0
+    Description: "Amount of % CPU share per service. Should be around 20% for T2/T3 (because CPU bursting and CPU credits)"
+  DeploymentMinimumHealthyPercent:
+    Type: Number
+    Description: "Lowest percentage of service's tasks that must remain in the RUNNING state during a deployment"
+  DeploymentMaximumPercent:
+    Type: Number
+    Description: "Highest percentage of service's tasks that can be in the RUNNING or PENDING state during a deployment"
+
+  # Parameters used for canary release
+  DockerImage:
+    Type: String
+    Description: "Docker image to be deployed to ECR. CircleCI should update it with the one pushed to ECR"
+  Release:
+    Type: String
+    Description: "Version of service release used for Canary release. Usually container id or git tag"
+
+  # Parameters for common parts
+  Version:
+    Type: String
+    Description: "Version for common parts"
+
+  # alb.yml
+  ALBScheme:
+    Type: String
+    AllowedValues:
+    - "internal"
+    - "internet-facing"
+  ALBTargetType:
+    Type: String
+    Default: "instance"
+    AllowedValues:
+    - "instance"
+    - "ip"
+  ALBSubnets:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: "Subnet for ALB and EC2 list"
+  FargateSubnets:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: "Subnet for Fargate"
+  VPCId:
+    Type: "AWS::EC2::VPC::Id"
+    Description: "VPC Id"
+  ALBSecurityGroups:
+    Type: CommaDelimitedList
+    Description: "List of security groups to attach to the ALB"
+  CertificateDnsName:
+    Type: String
+    Description: "Domain (or wildcard) to be used for SSL. Usually same as ALBDnsName"
+  AdditionalCertificateDnsNames:
+    Type: CommaDelimitedList
+    Description: "SubjectAlternativeNames to be used for SSL certificate. Usually can be left empty (so only CertificateDnsName is used)"
+  ALBDeregistrationDelay:
+    Type: Number
+    Description: "ALB Deregistration delay in seconds"
+  ALBHealtcheckEndpoint:
+    Type: String
+    Description: "ALB healthcheck endpoint"
+  ALBHealthCheckIntervalSeconds:
+    Type: Number
+    Description: "Interval for checking health of service"
+  ALBHealthCheckTimeoutSeconds:
+    Type: Number
+    Description: "Timeout for healthcheck"
+  ALBHealthyThresholdCount:
+    Type: Number
+    Description: "How many times service should report healthy before it is treated as healthy"
+  ALBUnhealthyThresholdCount:
+    Type: Number
+    Description: "How many times service should report unhealthy before it is treated as unhealthy"
+  ALBLogRetention:
+    Type: Number
+    MinValue: 0
+    MaxValue: 14
+    Description: "ALB log retention. 0 - disabled"
+
+  # alb-dns-alias.yml
+  ALBHostedZoneName:
+    Type: String
+    Description: "DNS Hosted zone for ALB Alias"
+  ALBDnsName:
+    Type: String
+    Description: "ALB Alias"
+
+  # cloudwatch-alb-alerts.yml
+  ALB5xxErrorsThreshold:
+    Type: Number
+    Description: "How many ALB 5xx errors per minute should trigger alert to IncidentNotificationsTopic"
+  ALB4xxErrorsThreshold:
+    Type: Number
+    Description: "How many ALB 4xx errors per minute should trigger alert to IncidentNotificationsTopic"
+  Target5xxErrorsThreshold:
+    Type: Number
+    Description: "How many 5xx HTTP status codes per minute from application should trigger alert to IncidentNotificationsTopic"
+  Target4xxErrorsThreshold:
+    Type: Number
+    Description: "How many 4xx HTTP status codes per minute from application should trigger alert to IncidentNotificationsTopic"
+  TargetResponseTimeThreshold:
+    Type: Number
+    Description: "Time in seconds for max response time to trigger alert to IncidentNotificationsTopic. We are calculating average for 1 minute and then comparing to threshold"
+  MinHealthyHostCount:
+    Type: Number
+    Description: "What is the minimum count of healthy containers in EC2 instances before alerting to IncidentNotificationsTopic"
+  ALB5xxErrorsEvalPeriods:
+    Type: Number
+    MinValue: 1
+    Description: "ALB 5xx evaluation periods"
+  ALB4xxErrorsEvalPeriods:
+    Type: Number
+    MinValue: 1
+    Description: "ALB 4xx evaluation periods"
+  Target5xxErrorsEvalPeriods:
+    Type: Number
+    MinValue: 1
+    Description: "Target 5xx evaluation periods"
+  Target4xxErrorsEvalPeriods:
+    Type: Number
+    MinValue: 1
+    Description: "Target 4xx evaluation periods"
+  TargetResponseTimeEvalPeriods:
+    Type: Number
+    MinValue: 1
+    Description: "Target Response Time evaluation periods"
+  MinHealthyHostCountEvalPeriods:
+    Type: Number
+    MinValue: 1
+    Description: "Min Healthy Host Count evaluation periods"
+
+  # ops-genie.yml
+  OpsGenieSubscriptionEndpoint:
+    Type: String
+    Description: "Create CloudWatch integration in OpsGenie, SAVE there and paste back here"
+
+  AdditionalContainerSecurityGroups:
+    Type: CommaDelimitedList
+    Description: "List of security groups to attach to the ECS service"
+
+  # New Relic integration
+  NewRelicAppName:
+    Type: String
+    Description: "Application name, which will be showed on New Relic"
+
+AWSTemplateFormatVersion: "2010-09-09"
+
+Conditions:
+  ALBLogsEnabled:
+    "Fn::Not":
+      - "Fn::Equals":
+        - Ref: ALBLogRetention
+        - "0"
+  HasAdditionalCertificates:
+    "Fn::Not": # Same as: AdditionalCertificateDnsNames != ""
+      - "Fn::Equals":
+          - "Fn::Join":
+              - ""
+              - Ref: AdditionalCertificateDnsNames
+          - ""
+  ServiceExists: !Equals [!Ref ServiceTaskDesiredCount, '']
+
+Resources:
+  # Application configuration
+  ECSTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: "awsvpc"
+      ExecutionRoleArn: !Ref ECSTaskExecutionRole
+      Family:
+        "Fn::Sub": "${AWS::StackName}-${ContainerName}"
+      TaskRoleArn: !GetAtt ECSTaskRole.Arn
+      Memory:
+        Ref: ContainerMaxMemory
+      Cpu:
+        Ref: ContainerMaxCpuShare
+      ContainerDefinitions:
+      - Name:
+          Ref: ContainerName
+        LogConfiguration:
+          LogDriver: awsfirelens
+          Options:
+            Name: "newrelic"
+            endpoint: "https://log-api.eu.newrelic.com/log/v1"
+          SecretOptions:
+            - Name: licenseKey
+              ValueFrom: !Ref NewRelicLicenseSecret
+        PortMappings:
+        - ContainerPort: 80
+        Environment:
+        - Name: GREETING
+          Value: "Hello from AWS"
+        - Name: VERSION
+          Value:
+            Ref: Release
+        - Name: NEW_RELIC_APP_NAME
+          Value:
+            Ref: NewRelicAppName
+        Secrets:
+          - Name: NEW_RELIC_LICENSE_KEY
+            ValueFrom: !Ref NewRelicLicenseSecret
+        Image:
+          Ref: DockerImage
+      - Name: log_router
+        Image: 533243300146.dkr.ecr.eu-west-1.amazonaws.com/newrelic/logging-firelens-fluentbit
+        Essential: False
+        Memory: 50
+        FirelensConfiguration:
+          Type: fluentbit
+          Options:
+            enable-ecs-log-metadata: "true"
+
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [ecs-tasks.amazonaws.com]
+            Action: ['sts:AssumeRole']
+      Path: /
+      Policies:
+        - PolicyName: AmazonECSTaskExecutionRolePolicy
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                # Allow the ECS Tasks to download images from ECR
+                - 'ecr:GetAuthorizationToken'
+                - 'ecr:BatchCheckLayerAvailability'
+                - 'ecr:GetDownloadUrlForLayer'
+                - 'ecr:BatchGetImage'
+                Resource: '*'
+        - PolicyName: AllowToAccessSecrets
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "secretsmanager:GetSecretValue"
+                Resource:
+                  - !Ref NewRelicLicenseSecret
+
+  ECSService:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster:
+        !Ref ECSCluster
+      LaunchType: FARGATE
+      PlatformVersion: "1.4.0" # Latest Fargate
+      DeploymentConfiguration:
+        MaximumPercent: !Ref DeploymentMaximumPercent
+        MinimumHealthyPercent: !Ref DeploymentMinimumHealthyPercent
+      DesiredCount: !If [ServiceExists, !Ref 'AWS::NoValue', !Ref ServiceTaskDesiredCount]
+      HealthCheckGracePeriodSeconds: 2 # Trying to prevent 502 Bad Gateway errors when Scaling out
+      LoadBalancers:
+      - ContainerName:
+          Ref: ContainerName
+        ContainerPort: 80
+        TargetGroupArn: !Ref ALBTargetGroup
+      TaskDefinition:
+        Ref: ECSTaskDefinition
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED # Update, if your instance is in private with NAT or public subnets
+          SecurityGroups:
+            "Fn::Split":
+              - ","
+              - "Fn::Sub":
+                - "${idList},${AlbToFargateSecurityGroup}"
+                - idList:
+                    "Fn::Join":
+                    - ","
+                    - Ref: AdditionalContainerSecurityGroups
+          Subnets: !Ref FargateSubnets
+    DependsOn:
+      - ALBListenerHTTP
+      - ALBListenerHTTPS
+
+  # Scaling parameters
+  ECSServiceScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity:
+        Ref: ServiceTaskMaxCap
+      MinCapacity:
+        Ref: ServiceTaskMinCap
+      ResourceId:
+        "Fn::Join":
+        - /
+        - - service
+          - !Ref ECSCluster
+          - "Fn::GetAtt":
+            - ECSService
+            - Name
+      RoleARN: !GetAtt "ApplicationAutoScalingRole.Arn"
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+  ECSServiceCPUScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: ECSServiceCPUScalingPolicy
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId:
+        Ref: ECSServiceScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue:
+          Ref: ECSServiceCPUScalingTarget
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+
+  ECSTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ["ecs-tasks.amazonaws.com"]
+            Action: ["sts:AssumeRole"]
+      Policies:
+        - PolicyName: ExamplePolicy
+          PolicyDocument:
+            Statement:
+            - Effect: "Allow"
+              Action:
+              - "sts:GetCallerIdentity"
+              Resource: "*"
+
+  # Deployment configuration
+  DeployerUser:
+    Type: AWS::IAM::User
+    Properties:
+      Groups:
+        - !Ref DeployerGroup
+  DeployerGroup:
+    Type: AWS::IAM::Group
+    Properties:
+      Policies:
+      - PolicyName: AllowToDeployNewVersion
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+          - Effect: "Allow"
+            Action:
+              - "cloudformation:DescribeStacks"
+              - "cloudformation:DescribeStackEvents"
+              - "cloudformation:DescribeStackResources"
+              - "cloudformation:CreateChangeSet"
+              - "cloudformation:DescribeChangeSet"
+              - "cloudformation:DeleteChangeSet"
+              - "cloudformation:ExecuteChangeSet"
+              - "cloudformation:ListChangeSets"
+              - "cloudformation:CancelUpdateStack"
+              - "cloudformation:ContinueUpdateRollback"
+              - "cloudformation:DeleteChangeSet"
+              - "cloudformation:UpdateStack"
+              - "cloudformation:ListStackResources"
+            Resource:
+              "Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${AWS::StackName}/*"
+      - PolicyName: AllowToPushToECR
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+          - Effect: "Allow"
+            Action:
+              - "ecr:GetAuthorizationToken"
+              - "ecr:BatchCheckLayerAvailability"
+            Resource: "*"
+          - Effect: "Allow"
+            Action:
+              - "ecr:InitiateLayerUpload"
+              - "ecr:UploadLayerPart"
+              - "ecr:CompleteLayerUpload"
+              - "ecr:PutImage"
+              - "ecr:DescribeImages"
+            Resource: !GetAtt "ECRRepository.Arn"
+      - PolicyName: DuringStackUpdateAllowUpdateECS
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+          - Effect: "Allow"
+            Action:
+             - "ecs:DescribeServices"
+             - "ecs:RegisterTaskDefinition"
+             - "ecs:DeregisterTaskDefinition"
+             - "ecs:UpdateService"
+            # CloudFormation update use "*" as a scope
+            Resource: "*"
+      - PolicyName: MonitorRollbackTriggers
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+          - Effect: "Allow"
+            Action:
+             - "cloudwatch:DescribeAlarmHistory"
+             - "cloudwatch:DescribeAlarms"
+            Resource: "*"
+      - PolicyName: DescribeVpcsAndSubnets
+        # It seems, that CF tries to validate parameters, having AWS specific parameter type.
+        # For example: Type: "AWS::EC2::VPC::Id"
+        # As a result, user, executing the stack update must have permission, which allow that.
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+          - Effect: "Allow"
+            Action:
+            - "ec2:DescribeSubnets"
+            - "ec2:DescribeVpcs"
+            Resource: "*"
+      - PolicyName: GetRole
+        # Required by: TaskRoleArn: !GetAtt ECSTaskRole.Arn
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+          - Effect: "Allow"
+            Action:
+              - "iam:GetRole"
+              - "iam:PassRole"
+            Resource: "*"
+
+  # This secret value must be manually replaced by actual
+  # New Relic license after deployment
+  NewRelicLicenseSecret:
+    Type: "AWS::SecretsManager::Secret"
+    Properties:
+      GenerateSecretString:
+        PasswordLength: 40
+        ExcludeCharacters: '"@/\ {}$'
+
+  DeployerLogins:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      UserName:
+        Ref: DeployerUser
+
+  CrashedContainerAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName:
+        "Fn::Sub": "${AWS::StackName}-container-crash"
+      Namespace:
+        "Fn::Sub": ${AWS::StackName}-ecs-events
+      MetricName: CrashedContainersCount
+      Statistic: Sum
+      ComparisonOperator: GreaterThanThreshold
+      Period: "60"
+      EvaluationPeriods: "1"
+      Threshold: "0"
+      AlarmActions:
+        - !Ref "IncidentNotificationsTopic"
+      TreatMissingData: notBreaching
+      ActionsEnabled: yes
+      Dimensions:
+        - Name: ContainerName
+          Value:
+            Ref: ContainerName
+
+  "Fn::Transform":
+    - Name: 'AWS::Include'
+      Parameters:
+        Location: !Sub 's3://h24-infrastructure-templates/${Version}/ecs-base.yml'
+    - Name: 'AWS::Include'
+      Parameters:
+        Location: !Sub 's3://h24-infrastructure-templates/${Version}/container-crash-alerts.yml'
+    - Name: 'AWS::Include'
+      Parameters:
+        Location: !Sub 's3://h24-infrastructure-templates/${Version}/alb.yml'
+    - Name: 'AWS::Include'
+      Parameters:
+        Location: !Sub 's3://h24-infrastructure-templates/${Version}/alb-listeners-http-https.yml'
+    - Name: 'AWS::Include'
+      Parameters:
+        Location: !Sub 's3://h24-infrastructure-templates/${Version}/alb-dns-alias.yml'
+    - Name: 'AWS::Include'
+      Parameters:
+        Location: !Sub 's3://h24-infrastructure-templates/${Version}/cloudwatch-incidents-sns.yml'
+    - Name: 'AWS::Include'
+      Parameters:
+        Location: !Sub 's3://h24-infrastructure-templates/${Version}/ops-genie.yml'
+    - Name: 'AWS::Include'
+      Parameters:
+        Location: !Sub 's3://h24-infrastructure-templates/${Version}/alb-ecs-fargate-mapping.yml'
+    - Name: 'AWS::Include'
+      Parameters:
+        Location: !Sub 's3://h24-infrastructure-templates/${Version}/ecs-roles.yml'
+    - Name: 'AWS::Include'
+      Parameters:
+        Location: !Sub 's3://h24-infrastructure-templates/${Version}/ecr-base.yml'
+    - Name: 'AWS::Include'
+      Parameters:
+        Location: !Sub 's3://h24-infrastructure-templates/${Version}/cloudwatch-alb-alerts.yml'
+
+Outputs:
+  AccessKeyId:
+    Description: "AWS_ACCESS_KEY_ID environment variable for your project's CircleCI settings"
+    Value: !Ref DeployerLogins
+  SecretAccessKey:
+    Description: "AWS_SECRET_ACCESS_KEY environment variable for your project's CircleCI settings"
+    Value: !GetAtt DeployerLogins.SecretAccessKey
+  ECRRepository:
+    Description: "ecrDockerRepository parameter for your project's .circleci/config.yml deploy step"
+    Value: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ECRRepository}"
+  ALBLogBucketName:
+    Description: "ALB Log bucket name"
+    Value: !Ref ALBLogBucket

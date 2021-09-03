@@ -1,0 +1,44 @@
+ContainerName: "service" # Could be updated. Need different names when multiple services are running on same ECS
+ContainerMaxMemory: "512"
+ContainerMaxCpuShare: "256"
+ServiceTaskMinCap: "1"
+ServiceTaskDesiredCount: "" # Specify value via artisan during creation: --parameter-overrides ServiceTaskDesiredCount=1
+ServiceTaskMaxCap: "10"
+ECSServiceCPUScalingTarget: "20.0"
+DeploymentMinimumHealthyPercent: "100"
+DeploymentMaximumPercent: "200" # Use 150 for more than 1 task per container
+DockerImage: null # Set null to use previously set CF value, specify a value to override the current CF value
+Release: null # Set null to use previously set CF value, specify a value to override the current CF value
+Version: "v4.1.0"
+ALBScheme: "internal"
+ALBTargetType: "ip"
+ALBSubnets: "subnet-0bbd63adeddb531e4,subnet-070fe893432304cd9,subnet-045e03ad16c952d1a" # Could be updated. Using Public subnets of Development network of Shared VPC as a default
+FargateSubnets: "subnet-0bbd63adeddb531e4,subnet-070fe893432304cd9,subnet-045e03ad16c952d1a"
+VPCId: "vpc-078a7803aa0b3375d" # Could be updated. Using Development network of Shared VPC as a default
+ALBSecurityGroups: "" # Must be updated. Should be copied from security stack Output
+AdditionalContainerSecurityGroups: '' # Add new ContainerSecurityGroup from Security stack
+ALBHostedZoneName: "" # Must be updated. Check existing Hosted zones in your account. E.g. scaling.team.home24.net.
+ALBDnsName: "" # Must be updated. your service name and ALBHostedZoneName. E.g. my-service-staging.scaling.team.home24.net
+CertificateDnsName: "" # Must be updated. Wildcard or same as ALBDnsName. E.g. *.scaling.team.home24.net
+AdditionalCertificateDnsNames: ""
+ALBDeregistrationDelay: "20"
+ALBHealtcheckEndpoint: "/"
+ALBHealthCheckIntervalSeconds: "5"
+ALBHealthCheckTimeoutSeconds: "4"
+ALBHealthyThresholdCount: "3"
+ALBUnhealthyThresholdCount: "2"
+ALBLogRetention: "0"
+ALB5xxErrorsThreshold: "5"
+ALB4xxErrorsThreshold: "10"
+Target5xxErrorsThreshold: "1"
+Target4xxErrorsThreshold: "10"
+TargetResponseTimeThreshold: "3"
+MinHealthyHostCount: "1"
+OpsGenieSubscriptionEndpoint: "https://api.eu.opsgenie.com/v1/json/cloudwatch?apiKey=00000000-0000-0000-0000-000000000000" # Should be updated later
+ALB5xxErrorsEvalPeriods: "1"
+ALB4xxErrorsEvalPeriods: "1"
+Target5xxErrorsEvalPeriods: "1"
+Target4xxErrorsEvalPeriods: "1"
+TargetResponseTimeEvalPeriods: "1"
+MinHealthyHostCountEvalPeriods: "1"
+NewRelicAppName: "GoService-Template-Staging"

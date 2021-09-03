@@ -1,0 +1,4 @@
+DTAP: "Production"
+Application: "GoService-Template" # Must be updated
+Owner: "scaling@tech.home24.de" # Should be updated later
+ProductGroup: "Scaling" # Should be updated later

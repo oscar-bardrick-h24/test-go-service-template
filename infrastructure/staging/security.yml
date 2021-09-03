@@ -1,0 +1,41 @@
+Description: >
+  ALB Security group to access ALB instances
+
+Parameters:
+  VPCId:
+    Type: "AWS::EC2::VPC::Id"
+    Description: "VPC Id"
+
+Outputs:
+  VPNInternalHTTPSAccess:
+    Description: "VPN HTTPS security group"
+    Value: !Ref VPNInternalHTTPSAccess
+    Export:
+      Name: !Sub "${AWS::StackName}-VPNInternalHTTPSAccess"
+
+  ContainerSecurityGroup:
+    Description: "Attached to ECS containers and can be used to reference them in other services."
+    Value: !Ref ContainerSecurityGroup
+    Export:
+      Name: !Sub "${AWS::StackName}-ContainerSecurityGroup"
+
+Resources:
+  VPNInternalHTTPSAccess:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Web access from VPN
+      VpcId:
+        Ref: VPCId
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 10.10.0.0/16
+        Description: "Allow VPN HTTPS access from internal network"
+
+  ContainerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Attached to ECS containers and can be used to reference them in other services.
+      VpcId:
+        Ref: VPCId
